@@ -160,11 +160,43 @@ p, span, div {{
 }}
 
 /* File Uploader */
+[data-testid="stFileUploader"] > section,
 [data-testid="stFileUploadDropzone"] {{
-    background-color: {surface_color};
-    border: 1px dashed {border_color};
-    border-radius: 12px;
+    background-color: {surface_color} !important;
+    border: 1px dashed {border_color} !important;
+    border-radius: 12px !important;
 }}
+[data-testid="stFileUploadDropzone"] * {{
+    color: {text_primary} !important;
+}}
+[data-testid="stFileUploadDropzone"] svg {{
+    fill: {text_primary} !important;
+    color: {text_primary} !important;
+}}
+[data-testid="stFileUploadDropzone"] button {{
+    background-color: {accent_color} !important;
+    color: #FFFFFF !important;
+    border: none !important;
+}}
+[data-testid="stFileUploadDropzone"] button * {{
+    color: #FFFFFF !important;
+}}
+[data-testid="stFileUploadDropzone"] button svg {{
+    fill: #FFFFFF !important;
+    color: #FFFFFF !important;
+}}
+[data-testid="stUploadedFile"] {{
+    background-color: {bg_color} !important;
+    color: {text_primary} !important;
+    border: 1px solid {border_color} !important;
+}}
+[data-testid="stUploadedFile"] * {{
+    color: {text_primary} !important;
+}}
+[data-testid="stUploadedFile"] svg {{
+    fill: {text_primary} !important;
+}}
+
 
 /* Chat Input */
 [data-testid="stChatInput"] {{
