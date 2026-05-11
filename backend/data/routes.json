@@ -1,0 +1,7 @@
+[
+  { "route": "Shenzhen → Karachi", "sea_days": "18-22", "air_days": "3-5", "sea_cost_kg": "$0.8-1.2", "air_cost_kg": "$3.5-5.0" },
+  { "route": "Dubai → Karachi", "sea_days": "5-7", "air_days": "1-2", "sea_cost_kg": "$1.2-2.0", "air_cost_kg": "$2.5-4.0" },
+  { "route": "New York → Karachi", "sea_days": "25-30", "air_days": "5-7", "sea_cost_kg": "$1.5-2.5", "air_cost_kg": "$5.0-8.0" },
+  { "route": "Hamburg → Karachi", "sea_days": "20-25", "air_days": "4-6", "sea_cost_kg": "$1.3-2.0", "air_cost_kg": "$4.5-7.0" },
+  { "route": "Tokyo → Karachi", "sea_days": "20-24", "air_days": "4-6", "sea_cost_kg": "$1.0-1.5", "air_cost_kg": "$4.0-6.0" }
+]

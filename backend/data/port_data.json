@@ -1,0 +1,7 @@
+{
+  "CNSZX": {"congestion": "LOW", "wait_days": 1},
+  "SGSIN": {"congestion": "MEDIUM", "wait_days": 2},
+  "AEJEA": {"congestion": "LOW", "wait_days": 1},
+  "PKKAR": {"congestion": "HIGH", "wait_days": 5, "note": "Frequent delays at Karachi Port"},
+  "PKPQQ": {"congestion": "MEDIUM", "wait_days": 3, "note": "Port Qasim - better than Karachi"}
+}
