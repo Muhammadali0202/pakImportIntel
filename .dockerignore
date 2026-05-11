@@ -1,0 +1,40 @@
+# Environment secrets - never bake into image
+**/.env
+**/.env.*
+
+# Python cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+
+# Virtual environments
+**/venv/
+**/env/
+**/.venv/
+
+# ChromaDB persistent store (runtime data, not source)
+**/chroma_db/
+
+# SQLite database files (seeded at runtime)
+**/*.db
+**/*.sqlite
+
+# Temporary files
+**/tmp/
+**/*.tmp
+
+# Version control
+**/.git
+**/.gitignore
+
+# IDE files
+**/.vscode/
+**/.idea/
+
+# Test files
+**/test_*.py
+
+# Logs
+**/*.log

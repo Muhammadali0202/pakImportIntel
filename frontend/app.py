@@ -5,6 +5,7 @@ import folium
 from streamlit_folium import st_folium
 import json
 import time
+from utils.api_client import get_shipments, estimate_duties, chat_query, upload_document
 
 # Page Configuration
 st.set_page_config(
@@ -30,32 +31,27 @@ if "route_info" not in st.session_state:
 if "nav_selection" not in st.session_state:
     st.session_state.nav_selection = "AI Chat"
 
-def calculate_duties(cif_value, hs_code="8517.13", is_filer=True):
-    """Pakistan Duty Calculator Engine"""
-    cd = cif_value * 0.20
-    rd = cif_value * 0.05
-    acd = (cif_value + cd + rd) * 0.02
-    st_tax = (cif_value + cd + rd + acd) * 0.18
-    
-    wht_rate = 0.055 if is_filer else 0.09
-    wht = (cif_value + cd + rd) * wht_rate
-    
-    total_duty = cd + rd + acd + st_tax + wht
-    landed_cost = cif_value + total_duty
-    
-    return {
-        "CIF Value": cif_value,
-        "Customs Duty (CD) @ 20%": cd,
-        "Regulatory Duty (RD) @ 5%": rd,
-        "Additional Customs Duty (ACD) @ 2%": acd,
-        "Sales Tax (ST) @ 18%": st_tax,
-        "Withholding Tax (WHT)": wht,
-        "Total Taxes": total_duty,
-        "Landed Cost": landed_cost
-    }
+# Intelligence placeholders
+for key in ['intel_origin', 'intel_destination', 'intel_hs_code', 'intel_declared_value', 'intel_consignee', 'intel_shipment_type', 'intel_status']:
+    if key not in st.session_state:
+        st.session_state[key] = "—"
 
 default_cif = 15000000
-default_duties = calculate_duties(default_cif, "8517.13", True)
+# Try to fetch real duty estimation from backend; fallback to zeroes if unavailable.
+res = estimate_duties(default_cif, "CN", "8517.13")
+if res and "raw_data" in res:
+    default_duties = res["raw_data"]
+else:
+    default_duties = {
+        "CIF Value": default_cif,
+        "Customs Duty (CD) @ 20%": 0,
+        "Regulatory Duty (RD) @ 5%": 0,
+        "Additional Customs Duty (ACD) @ 2%": 0,
+        "Sales Tax (ST) @ 18%": 0,
+        "Withholding Tax (WHT)": 0,
+        "Total Taxes": 0,
+        "Landed Cost": default_cif
+    }
 
 if "current_metrics" not in st.session_state:
     st.session_state.current_metrics = {
@@ -253,6 +249,50 @@ p, span, div {{
 .intel-key {{ color: {text_secondary}; }}
 .intel-val {{ color: {text_primary}; font-weight: 500; }}
 
+/* Premium Chat Bubbles */
+[data-testid="stChatMessage"] {{
+    background-color: {surface_color} !important;
+    border: 1px solid {border_color} !important;
+    border-radius: 16px !important;
+    margin-bottom: 12px !important;
+    padding: 1rem !important;
+}}
+
+/* Distinguish User and Assistant */
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {{
+    background-color: rgba(0, 166, 251, 0.05) !important;
+    border: 1px solid rgba(0, 166, 251, 0.2) !important;
+}}
+
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {{
+    background-color: {surface_color} !important;
+    border: 1px solid {border_color} !important;
+}}
+
+[data-testid="stChatMessage"] .stMarkdown p {{
+    font-size: 0.95rem !important;
+    line-height: 1.6 !important;
+    color: {text_primary} !important;
+}}
+
+/* Code Blocks & Tables in Chat */
+pre {{
+    background-color: {bg_color} !important;
+    border: 1px solid {border_color} !important;
+    border-radius: 8px !important;
+}}
+table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+}}
+th, td {{
+    padding: 8px 12px;
+    border: 1px solid {border_color};
+    text-align: left;
+}}
+th {{ background-color: rgba(0, 166, 251, 0.1); }}
+
 /* Status indicators */
 .status-badge-transit {{ color: {accent_color}; font-weight: 500; }}
 .status-badge-hold {{ color: {danger_color}; font-weight: 500; }}
@@ -317,62 +357,43 @@ def classify_intent(query):
 
 def send_query(query, context=None):
     """Dual Mode API System: Tries FastAPI, falls back to intelligent mock JSON"""
-    try:
-        response = requests.post(
-            "http://localhost:8000/api/chat/query",
-            json={"query": query, "context": context},
-            timeout=1
-        )
-        response.raise_for_status()
-        return response.json()
-    except (requests.exceptions.RequestException, requests.exceptions.ConnectionError):
+    response = chat_query(query, context)
+    if response:
+        # Backend returns 'response' key — normalize to 'answer' for UI consistency
+        if "response" in response and "answer" not in response:
+            response["answer"] = response.pop("response")
+        return response
+    else:
+        # Fallback if backend is unreachable
         time.sleep(0.5) # Simulate API latency
         intent = classify_intent(query)
         
         cif_val = 15000000 # 15M PKR
-        duties = calculate_duties(cif_val, "8517.13", True)
-        
         mock_response = {
-            "answer": "I have analyzed your request.",
-            "citations": ["Commercial_Invoice_001.pdf", "Customs_Tariff_2024.pdf"],
+            "answer": "I have analyzed your request. (Backend offline, using fallback data)",
+            "citations": [],
             "route_info": {
-                "origin": [22.5431, 114.0579], # Shenzhen
-                "destination": [24.8607, 67.0011], # Karachi
+                "origin": [22.5431, 114.0579],
+                "destination": [24.8607, 67.0011],
                 "midpoint": [23.7, 90.5],
                 "status": "IN_TRANSIT",
                 "threat_level": "Medium"
             },
             "risk_profile": {
                 "level": "Medium",
-                "alerts": ["Port Qasim Congestion: 48h delay", "Strait of Malacca: Piracy advisory active"]
+                "alerts": ["Port Qasim Congestion: 48h delay"]
             },
             "trade_alerts": [
-                "SBP reduces LC margins for telecom imports by 10%.",
-                "FBR expected to revise Regulatory Duty (RD) on HS 8517.13 in upcoming budget."
+                "SBP reduces LC margins for telecom imports by 10%."
             ],
-            "shipment_details": {
-                "id": "SHP-2024-883",
-                "hs_code": "8517.13",
-                "declared_value": "$45,000"
-            },
             "financial_metrics": {
-                "total_duty_pkr": duties["Total Taxes"],
-                "wht_pkr": duties["Withholding Tax (WHT)"],
-                "cif_pkr": duties["CIF Value"],
-                "landed_cost_pkr": duties["Landed Cost"]
+                "total_duty_pkr": 0,
+                "wht_pkr": 0,
+                "cif_pkr": cif_val,
+                "landed_cost_pkr": cif_val
             },
-            "detailed_duty": duties
+            "detailed_duty": {}
         }
-
-        if intent == 'shipment_tracking':
-            mock_response['answer'] = "Shipment Status: Your cargo from Shenzhen is currently IN_TRANSIT. It is passing through the Strait of Malacca. Expect a 2-day delay due to congestion at Port Qasim."
-        elif intent == 'duty_calculation':
-            mock_response['answer'] = f"Duty Calculation for HS 8517.13: Based on a CIF of {format_pkr(cif_val)}, the estimated landed cost is {format_pkr(mock_response['financial_metrics']['landed_cost_pkr'])}. Customs duty applies at 20%."
-        elif intent == 'route_recommendation':
-            mock_response['answer'] = "Route Analysis: The direct sea route takes 14 days ($1,200). Routing via Colombo adds 3 days but saves $200. Air freight via Dubai takes 2 days but costs $4,500. Recommended: Direct Sea Route."
-        elif intent == 'document_question':
-            mock_response['answer'] = "Document Analysis: The uploaded Commercial Invoice shows a declared value of $45,000 for mobile phones. The HS code 8517.13 matches the description."
-            
         return mock_response
 
 def build_map(route_info=None):
@@ -424,8 +445,46 @@ with col_left:
     
     uploaded_file = st.file_uploader("Upload Documents", type=["pdf", "jpg", "png", "jpeg"], label_visibility="collapsed")
     if uploaded_file and uploaded_file.name not in st.session_state.uploaded_docs:
-        st.session_state.uploaded_docs.append(uploaded_file.name)
-        
+        with st.spinner(f"Processing {uploaded_file.name}..."):
+            result = upload_document(uploaded_file.getvalue(), uploaded_file.name)
+            if result and result.get("status") == "success":
+                st.session_state.uploaded_docs.append(uploaded_file.name)
+                st.success(f"✅ {uploaded_file.name} ingested.")
+                
+                # Immediately update metrics and intel from the uploaded document
+                ai_response = result.get("extracted_intel", {})
+                if ai_response:
+                    # 1. Update Left Sidebar (Active Intel)
+                    intel = ai_response.get("extracted_intel", {})
+                    if isinstance(intel, dict):
+                        st.session_state.intel_origin = intel.get("origin", st.session_state.intel_origin)
+                        st.session_state.intel_destination = intel.get("destination", st.session_state.intel_destination)
+                        st.session_state.intel_hs_code = intel.get("hs_code", st.session_state.intel_hs_code)
+                        st.session_state.intel_declared_value = intel.get("declared_value", st.session_state.intel_declared_value)
+                        st.session_state.intel_consignee = intel.get("consignee", st.session_state.intel_consignee)
+                        st.session_state.intel_shipment_type = intel.get("shipment_type", st.session_state.intel_shipment_type)
+                        st.session_state.intel_status = intel.get("status", st.session_state.intel_status)
+                    
+                    # 2. Update Right Column (Financial Intelligence)
+                    if "financial_metrics" in ai_response:
+                        metrics = ai_response["financial_metrics"]
+                        if metrics.get("total_duty_pkr") != 0:
+                            st.session_state.current_metrics = metrics
+                            
+                    # 3. Update Intelligence Tabs (Risk/Alerts)
+                    if "risk_profile" in ai_response:
+                        st.session_state.current_risk = ai_response["risk_profile"]
+                    if "trade_alerts" in ai_response:
+                        st.session_state.current_alerts = ai_response["trade_alerts"]
+                        
+                    # 4. Update Tactical Map
+                    if "route_info" in ai_response:
+                        st.session_state.route_info = ai_response["route_info"]
+                
+                st.rerun()
+            else:
+                st.error(f"❌ Failed to process {uploaded_file.name}. Is the backend running?")
+
     if st.session_state.uploaded_docs:
         for doc in st.session_state.uploaded_docs:
             st.markdown(f"<span style='font-size:0.85rem;'>📄 {doc}</span>", unsafe_allow_html=True)
@@ -444,13 +503,13 @@ with col_left:
     st.markdown(f"""
         <div class="extracted-intel-card">
             <h5 style="margin-top:0; margin-bottom:12px; color:{text_primary};">Active Intel</h5>
-            <div class="intel-item"><span class="intel-key">Origin</span><span class="intel-val">Shenzhen</span></div>
-            <div class="intel-item"><span class="intel-key">Destination</span><span class="intel-val">Karachi</span></div>
-            <div class="intel-item"><span class="intel-key">HS Code</span><span class="intel-val">8517.13</span></div>
-            <div class="intel-item"><span class="intel-key">Declared Value</span><span class="intel-val">$45,000</span></div>
-            <div class="intel-item"><span class="intel-key">Consignee</span><span class="intel-val">TechCorp PK</span></div>
-            <div class="intel-item"><span class="intel-key">Shipment Type</span><span class="intel-val">Electronics</span></div>
-            <div class="intel-item"><span class="intel-key">Customs Status</span><span class="intel-val status-badge-transit">IN_TRANSIT</span></div>
+            <div class="intel-item"><span class="intel-key">Origin</span><span class="intel-val">{st.session_state.get('intel_origin', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">Destination</span><span class="intel-val">{st.session_state.get('intel_destination', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">HS Code</span><span class="intel-val">{st.session_state.get('intel_hs_code', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">Declared Value</span><span class="intel-val">{st.session_state.get('intel_declared_value', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">Consignee</span><span class="intel-val">{st.session_state.get('intel_consignee', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">Shipment Type</span><span class="intel-val">{st.session_state.get('intel_shipment_type', '—')}</span></div>
+            <div class="intel-item"><span class="intel-key">Customs Status</span><span class="intel-val">{st.session_state.get('intel_status', '—')}</span></div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -461,24 +520,40 @@ with col_center:
     st.markdown(f"<h3 style='color: {text_primary}; margin-bottom: 24px;'>{st.session_state.nav_selection}</h3>", unsafe_allow_html=True)
     
     if st.session_state.nav_selection == "Dashboard":
+        # Fetch live shipments from backend; fall back to empty table if offline
+        live_data = get_shipments()
+        if live_data:
+            shipments_df = pd.DataFrame(live_data)
+        else:
+            shipments_df = pd.DataFrame(columns=["id", "status", "eta", "current_location", "origin", "destination"])
+            st.warning("⚠️ Backend offline — no shipment data available.")
         st.dataframe(
-            mock_shipments.style.map(
-                lambda v: f"color: {accent_color};" if v == "IN_TRANSIT" else (f"color: {danger_color};" if v in ["CUSTOMS_HOLD", "PORT_CONGESTION"] else f"color: {success_color};"),
-                subset=["Status"]
-            ),
+            shipments_df,
             use_container_width=True,
             hide_index=True
         )
         
     elif st.session_state.nav_selection == "Route Comparison":
-        st.markdown("##### Route Alternatives: Shenzhen to Karachi")
+        origin = st.session_state.intel_origin if st.session_state.intel_origin != "—" else "Shenzhen"
+        dest = st.session_state.intel_destination if st.session_state.intel_destination != "—" else "Karachi"
+        
+        st.markdown(f"##### Route Alternatives: {origin} to {dest}")
+        
+        if st.session_state.uploaded_docs:
+            with st.spinner("Calculating optimal routes based on documents..."):
+                analysis_query = f"Compare shipping routes from {origin} to {dest} based on current document context and provide the most balanced recommendation."
+                analysis = send_query(analysis_query)
+                st.write(analysis.get("answer", "Analysis unavailable."))
+        
         routes = pd.DataFrame([
             {"Route": "Direct Sea", "ETA": "14 Days", "Cost": "$1,200", "Congestion": "Low", "Recommendation": "Optimal"},
             {"Route": "Sea via Colombo", "ETA": "17 Days", "Cost": "$1,000", "Congestion": "High", "Recommendation": "Risk of Delay"},
             {"Route": "Air via Dubai", "ETA": "2 Days", "Cost": "$4,500", "Congestion": "None", "Recommendation": "Fastest"},
         ])
         st.dataframe(routes, use_container_width=True, hide_index=True)
-        st.info("Analysis: Direct Sea is the most balanced. Air freight is 3.7x more expensive but saves 12 days. Colombo route is cheaper but carries a high risk of port congestion delays.")
+        
+        if not st.session_state.uploaded_docs:
+            st.info("Analysis: Direct Sea is the most balanced. Air freight is 3.7x more expensive but saves 12 days. Colombo route is cheaper but carries a high risk of port congestion delays.")
 
     elif st.session_state.nav_selection == "Duty Calculator":
         st.markdown("##### Duty Estimation Parameters")
@@ -495,17 +570,21 @@ with col_center:
             
         if submitted:
             is_filer = filer_status == "Filer (Active)"
-            calculated_duties = calculate_duties(cif_input, hs_code_input, is_filer)
+            response = estimate_duties(cif_input, product_hs_code=hs_code_input, is_filer=is_filer)
             
-            # Update session state metrics
-            st.session_state.current_metrics = {
-                "total_duty_pkr": calculated_duties["Total Taxes"],
-                "wht_pkr": calculated_duties["Withholding Tax (WHT)"],
-                "cif_pkr": calculated_duties["CIF Value"],
-                "landed_cost_pkr": calculated_duties["Landed Cost"]
-            }
-            st.session_state.detailed_duty = calculated_duties
-            st.success("Duties recalculated successfully. See Financial Intelligence panel for details.")
+            if response and "raw_data" in response:
+                calculated_duties = response["raw_data"]
+                # Update session state metrics
+                st.session_state.current_metrics = {
+                    "total_duty_pkr": calculated_duties["Total Taxes"],
+                    "wht_pkr": calculated_duties["Withholding Tax (WHT)"],
+                    "cif_pkr": calculated_duties["CIF Value"],
+                    "landed_cost_pkr": calculated_duties["Landed Cost"]
+                }
+                st.session_state.detailed_duty = calculated_duties
+                st.success("Duties recalculated successfully. See Financial Intelligence panel for details.")
+            else:
+                st.error("Failed to calculate duties. Please check if the backend is running.")
             
         st.markdown("##### Duty Breakdown")
         duty_df = pd.DataFrame(list(st.session_state.detailed_duty.items()), columns=["Tax Component", "Amount (PKR)"])
@@ -513,15 +592,15 @@ with col_center:
         st.dataframe(duty_df, hide_index=True, use_container_width=True)
 
     else:
-        # AI Chat Workspace
-        chat_container = st.container(height=600)
+        # AI Chat Workspace - Expanded for rich Markdown content
+        chat_container = st.container(height=800)
         
         with chat_container:
             for msg in st.session_state.chat_history:
                 with st.chat_message(msg["role"]):
-                    st.write(msg["content"])
+                    st.markdown(msg["content"])
                     if "citations" in msg and msg["citations"]:
-                        st.caption(f"Citations: {', '.join(msg['citations'])}")
+                        st.caption(f"Sources: {', '.join(msg['citations'])}")
         
         if prompt := st.chat_input("Ask about duties, tracking, or documents..."):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
@@ -531,16 +610,30 @@ with col_center:
                     st.write(prompt)
                     
                 with st.chat_message("assistant"):
-                    with st.spinner("Analyzing intelligence..."):
-                        response_data = send_query(prompt, context={"docs": st.session_state.uploaded_docs})
-                        st.write(response_data["answer"])
+                    with st.spinner("Analyzing Intelligence Reports..."):
+                        # Get live data from backend
+                        raw_response = chat_query(prompt, context={"docs": st.session_state.uploaded_docs})
+                        
+                        # Defensive parsing
+                        if raw_response and isinstance(raw_response, dict):
+                            response_data = raw_response
+                            answer = response_data.get("answer", "I received a valid data payload but no textual answer was provided.")
+                        elif isinstance(raw_response, str):
+                            # In case the backend returns a raw string instead of the JSON object
+                            answer = raw_response
+                            response_data = {"answer": answer}
+                        else:
+                            answer = "I'm sorry, I'm having trouble connecting to my intelligence base right now. Please verify if the backend is online."
+                            response_data = {"answer": answer}
+
+                        st.markdown(answer)
                         if response_data.get("citations"):
-                            st.caption(f"Citations: {', '.join(response_data['citations'])}")
+                            st.caption(f"Sources: {', '.join(response_data['citations'])}")
                             
             st.session_state.chat_history.append({
                 "role": "assistant", 
-                "content": response_data["answer"],
-                "citations": response_data.get("citations", [])
+                "content": answer,
+                "citations": response_data.get("citations", []) if isinstance(response_data, dict) else []
             })
             
             if "route_info" in response_data:
@@ -553,6 +646,17 @@ with col_center:
                 st.session_state.current_alerts = response_data["trade_alerts"]
             if "risk_profile" in response_data:
                 st.session_state.current_risk = response_data["risk_profile"]
+            if "extracted_intel" in response_data:
+                # Handle both direct and nested extraction
+                intel = response_data["extracted_intel"]
+                if isinstance(intel, dict):
+                    st.session_state.intel_origin = intel.get("origin", st.session_state.intel_origin)
+                    st.session_state.intel_destination = intel.get("destination", st.session_state.intel_destination)
+                    st.session_state.intel_hs_code = intel.get("hs_code", st.session_state.intel_hs_code)
+                    st.session_state.intel_declared_value = intel.get("declared_value", st.session_state.intel_declared_value)
+                    st.session_state.intel_consignee = intel.get("consignee", st.session_state.intel_consignee)
+                    st.session_state.intel_shipment_type = intel.get("shipment_type", st.session_state.intel_shipment_type)
+                    st.session_state.intel_status = intel.get("status", st.session_state.intel_status)
 
             st.rerun()
 
